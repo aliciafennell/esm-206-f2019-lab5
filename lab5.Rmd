@@ -9,3 +9,201 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+#### Lab 5 objectives:
+
+- Learn to parse dates with 'libridate' package
+- Get counts of observations with count()
+- Uncount() rows 
+- One and two sample t-test
+- Create a heat map with geom_tile()
+
+```{r, include = FALSE}
+#include = FALSE means code and outputs will not show up
+
+library(tidyverse)
+library(here)
+library(janitor)
+
+# read in data
+# lobster data untidy because of "lobster count" ... those are all individual observations but are grouped together as a count. It's better if every observation has its own row and then you can decide how you want to group and/or count things...
+# -99999 replace with NA
+
+lobster_abundance <- read_csv(here("data", "lobster_abundance.csv"),
+                              na = "-99999") %>% 
+  clean_names()
+  
+```
+
+Use tidyr::uncount() function to convert lobster data from frequency format to case format. (give each observation its own row)... uncount() is great whenever you have a count/frequency column 
+
+```{r}
+lobster_tidy <- lobster_abundance %>% 
+  uncount(lobster_count)
+```
+
+#### Exploratory data visualization 
+
+We'll only consider 'site' as our variable of interest
+LOok at data, think about it, try different things, repeat
+
+```{r}
+
+ggplot(lobster_tidy, aes(x = site, y = size_mm)) +
+  geom_jitter(aes(color = site),
+              alpha = .5,
+              width =.2)
+
+# we can start asking questions...
+# Let's try histogram, differing by site
+# facet_wrap makes them into different plots based on site
+# scale = "free" means the scales can differ plot to plot based on the data- dont do this if we are comparing data to each other. but if we want to see them individually, we can scale = free.
+
+ggplot(lobster_tidy, aes(x = size_mm)) +
+  geom_histogram(aes(fill = site)) +
+  facet_wrap(~site, scale = "free") 
+
+# see how our sample compares to a perfect theorical version...
+# either we will see how ALL lobsters compare to perfect population / normally distributed, OR we can add facet_wrap() to see by site how that relationship looks
+# geom_qq() defaults to normal distribution. 
+
+ggplot(lobster_tidy, aes(sample = size_mm)) +
+  geom_qq() +
+  facet_wrap(~site)
+```
+
+#### Convert the date column to class 'Date'
+
+"lubridate" package to convert to date format and easily parse month and year. 
+We've changed the class to "date."
+
+```{r}
+lobster_date <- lobster_tidy %>% 
+  mutate(date_new = lubridate::mdy(date))
+```
+
+We'll parse year and month using lubridate::month() and year()
+
+```{r}
+
+lobster_parse_date <- lobster_date %>% 
+  mutate(obs_month = lubridate::month(date_new, label = TRUE),
+         obs_year = lubridate::year(date_new))
+
+# label = TRUE will give month abb instead of number
+
+```
+
+lubridate is COOL!
+
+Now let's find counts of observed lobsters based on different heirarchical groupings
+
+count() function allows you to create counts based on grouping that YOU find most important. Thats why we started with uncount(). We get to decide groupings to count things by.
+
+```{r}
+lobster_ym <- lobster_parse_date %>% 
+  count(obs_year, obs_month)
+
+lobster_y <- lobster_parse_date %>% 
+  count(obs_year)
+
+lobster_site <- lobster_parse_date %>% 
+  count(site)
+
+lobster_site
+```
+
+If we want to create a summary table that contains stats other than count by group, it's easier to use group_by() + n()
+
+for example, if we are only interested in site...
+
+```{r}
+
+lobster_summary <- lobster_parse_date %>% 
+  group_by(site) %>% 
+  summarize(lobster_number = n(),
+            mean_size = mean(size_mm, na.rm = TRUE),
+            sd_size = sd(size_mm, na.rm = TRUE))
+
+lobster_summary
+```
+
+#### Find confidence intervals
+
+Use t.test() function to find confidence intervals for one sample and perform t tests to compare means of two samples. 
+
+```{r}
+ivee_lobsters <- lobster_tidy %>% 
+  filter(site == "IVEE") %>% 
+  pull(size_mm)
+
+## pull() makes it into a vector? Not a table ?
+
+t.test(ivee_lobsters)
+
+```
+
+We want to know if there's a significant difference between NAPLES and MOHAWAK... if we think means are normally dist and we think the mean is an appropriate... something... we'll compare those two.
+
+#### 2 sample t test to compare means
+
+We want to ask if there's a sig difference in lobster lengths at these two places. We've done exploratory analyses to determine that 2 sample t test for means comparison is appropriate. 
+
+```{r}
+
+# first make vector for lobster sizes at naples and mohawk
+
+napl_lobsters <- lobster_tidy %>% 
+  filter(site == "NAPL") %>% 
+  pull(size_mm)
+
+mohk_lobsters <- lobster_tidy %>% 
+  filter(site == "MOHK") %>% 
+  pull(size_mm)
+
+mn_ttest <- t.test(mohk_lobsters, napl_lobsters)
+
+mn_ttest
+
+```
+
+There's a significant difference in lobster lengths between mohawk and naples reef. Statement of significance should be least interesting part of data. P value isn't that cool. 
+
+```{r}
+lobster_mn <- lobster_tidy %>% 
+  filter(site %in% c("NAPL", "MOHK"))
+
+mn_ttest2 <- t.test(size_mm ~ site, data = lobster_mn)
+
+mn_ttest2
+
+# Same results! Just different ways to get there
+```
+
+If you're writing a report/summary of this data / t test, don't copy and paste values! not reproducible. 
+
+Use ?t.test in the console to see what the names are associated with values
+
+So you can call these things with mn_ttest2$p.value etc... 
+
+Check it out! Here's the p value: `r mn_ttest2$p.value`
+
+When knitted, that will show up as a number. Reproducible.
+
+Here's t statistic: `r mn_ttest2$statistic`
+
+"in line referencing" is a great way to not copy and paste. will automatically make updates for you. 
+
+#### Heat map
+
+generally good for showing 3 variables... 
+
+```{r}
+
+lobster_ys <- lobster_parse_date %>% 
+  count(obs_year, site)
+
+ggplot(lobster_ys, aes(x = obs_year,
+                       y = site)) +
+  geom_tile(aes(fill = n))
+```
+
